@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.config import Settings
 from app.models.schemas import ActionResult, CommandStatus, Intent, TelegramMessage
 from app.services.auth import is_authorized_user
-from app.services.parser import HELP_TEXT, parse_command
+from app.services.llm_parser import AnthropicParser
+from app.services.parser import HELP_TEXT, START_TEXT, parse_command
 
 
 class KiboHandler:
@@ -14,13 +15,22 @@ class KiboHandler:
         settings: Settings,
         repository,
         notion,
+        llm_parser=None,
     ):
         self.settings = settings
         self.repository = repository
         self.notion = notion
+        self.llm_parser = llm_parser or AnthropicParser(settings)
 
     def handle(self, message: TelegramMessage) -> str:
-        parsed = parse_command(message.text, now=datetime.now(self.settings.tzinfo))
+        now = datetime.now(self.settings.tzinfo)
+        parsed = parse_command(message.text, now=now)
+        if parsed.needs_clarification and not message.text.strip().startswith("/"):
+            try:
+                llm_parsed = self.llm_parser.parse(message.text, now=now)
+                parsed = llm_parsed
+            except Exception:
+                parsed = parsed
 
         if not is_authorized_user(message.user_id, self.settings):
             command_id = self.repository.create_command(
@@ -40,17 +50,69 @@ class KiboHandler:
         user_id = self.repository.upsert_user(message, timezone=self.settings.default_timezone)
         command_id = self.repository.create_command(user_id=user_id, message=message, parsed=parsed)
 
+        if message.chat_type != "private":
+            self.repository.update_command_status(
+                command_id,
+                CommandStatus.REJECTED,
+                error_message="Kibo MVP only supports private Telegram chats",
+            )
+            return "Kibo currently works only in a private chat. Open this bot directly and send /start."
+
         if parsed.error:
-            self.repository.update_command_status(command_id, CommandStatus.FAILED, error_message=parsed.error)
+            status = CommandStatus.REJECTED if parsed.needs_clarification else CommandStatus.FAILED
+            self.repository.update_command_status(command_id, status, error_message=parsed.error)
             return parsed.error
+
+        if parsed.intent == Intent.START:
+            self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
+            return START_TEXT
 
         if parsed.intent == Intent.HELP:
             self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
             return HELP_TEXT
 
+        if parsed.intent == Intent.TODAY:
+            today = self.repository.today_items(user_id, datetime.now(self.settings.tzinfo).date())
+            self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
+            return format_today(today)
+
+        if parsed.intent == Intent.WEEK:
+            start_day = datetime.now(self.settings.tzinfo).date()
+            week = self.repository.upcoming_items(user_id, start_day, start_day + timedelta(days=7))
+            self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
+            return format_week(week)
+
+        if parsed.intent == Intent.SEARCH:
+            rows = self.repository.search_items(user_id, parsed.body)
+            self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
+            return format_search_results(parsed.body, rows)
+
+        if parsed.intent == Intent.OPEN:
+            row = self.repository.best_open_item(user_id, parsed.body)
+            self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
+            return format_open_result(parsed.body, row)
+
+        if parsed.intent == Intent.DONE:
+            row = self.repository.best_completable_item(user_id, parsed.body)
+            if not row:
+                self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
+                return f"I could not find an open task, reminder, or event matching: {parsed.body}"
+            if not row.get("external_id"):
+                self.repository.update_command_status(command_id, CommandStatus.FAILED, error_message="Matched item has no Notion page ID")
+                return "I found a match, but it does not have a Notion page ID to update."
+            result = self.notion.mark_done(row["external_id"], Intent(row["intent"]))
+            self.repository.create_action(command_id=command_id, user_id=user_id, result=result)
+            if result.status == "succeeded":
+                self.repository.mark_reminder_done_for_command(row["command_id"])
+                self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
+                return f"Marked done: {clean_raw_text(row['raw_text'])}\n{result.external_url or row.get('external_url') or ''}".strip()
+            self.repository.update_command_status(command_id, CommandStatus.FAILED, error_message=result.error_message)
+            return "I found the item, but Notion could not mark it done."
+
         if parsed.intent == Intent.SUMMARY:
             summary = self.repository.summary_for_day(user_id, datetime.now(self.settings.tzinfo).date())
-            response = format_summary(summary)
+            today = self.repository.today_items(user_id, datetime.now(self.settings.tzinfo).date())
+            response = format_summary(summary, today=today)
             log_result = self.notion.create_log(f"Kibo Summary {summary['date']}", response)
             self.repository.create_action(command_id=command_id, user_id=user_id, result=log_result)
             self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
@@ -60,6 +122,18 @@ class KiboHandler:
             result = self.notion.create_for_intent(parsed.intent, parsed.parsed_payload, parsed.raw_text)
             self.repository.create_action(command_id=command_id, user_id=user_id, result=result)
             if result.status == "succeeded":
+                if parsed.intent == Intent.REMINDER and parsed.parsed_payload.get("datetime"):
+                    reminder_at = datetime.fromisoformat(str(parsed.parsed_payload["datetime"]))
+                    if reminder_at.tzinfo is None:
+                        reminder_at = reminder_at.replace(tzinfo=self.settings.tzinfo)
+                    self.repository.create_reminder(
+                        command_id=command_id,
+                        user_id=user_id,
+                        telegram_chat_id=message.chat_id,
+                        title=parsed.body,
+                        reminder_at=reminder_at,
+                        notion_url=result.external_url,
+                    )
                 self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
                 return confirmation_for(parsed.intent, parsed.body, result.external_url)
             self.repository.update_command_status(command_id, CommandStatus.FAILED, error_message=result.error_message)
@@ -81,12 +155,88 @@ def confirmation_for(intent: Intent, body: str, url: str | None) -> str:
     return f"{prefix}: {body}{suffix}"
 
 
-def format_summary(summary: dict) -> str:
+def format_summary(summary: dict, *, today: dict | None = None) -> str:
     counts = summary.get("counts", [])
     if not counts:
-        return f"Kibo Summary for {summary['date']}\nNo commands captured yet."
+        base = f"Kibo Summary for {summary['date']}\nNo commands captured yet."
+        return append_today_items(base, today)
 
     lines = [f"Kibo Summary for {summary['date']}"]
     for row in counts:
         lines.append(f"{row['intent']} / {row['status']}: {row['count']}")
+    return append_today_items("\n".join(lines), today)
+
+
+def format_today(today: dict) -> str:
+    items = today.get("items", [])
+    if not items:
+        return f"Today ({today['date']})\nNo scheduled tasks, reminders, or events."
+
+    lines = [f"Today ({today['date']})"]
+    for item in items[:12]:
+        payload = item.get("parsed_payload") or {}
+        when = payload.get("datetime") or payload.get("date") or "today"
+        text = item.get("raw_text", "").strip()
+        url = item.get("external_url")
+        line = f"- {item['intent']}: {text} ({when})"
+        if url:
+            line += f"\n  {url}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def format_week(week: dict) -> str:
+    items = week.get("items", [])
+    if not items:
+        return f"Week ({week['start_date']} to {week['end_date']})\nNo upcoming tasks, reminders, or events."
+
+    lines = [f"Week ({week['start_date']} to {week['end_date']})"]
+    for item in items[:20]:
+        payload = item.get("parsed_payload") or {}
+        when = payload.get("datetime") or payload.get("date") or "scheduled"
+        line = f"- {item['intent']}: {clean_raw_text(item.get('raw_text', ''))} ({when})"
+        if item.get("external_url"):
+            line += f"\n  {item['external_url']}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def format_search_results(query: str, rows: list[dict]) -> str:
+    if not rows:
+        return f"No Kibo results for: {query}"
+    lines = [f"Search results for: {query}"]
+    for row in rows[:8]:
+        line = f"- {row['intent']}: {clean_raw_text(row.get('raw_text', ''))}"
+        if row.get("external_url"):
+            line += f"\n  {row['external_url']}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def format_open_result(query: str, row: dict | None) -> str:
+    if not row:
+        return f"I could not find anything matching: {query}"
+    if row.get("external_url"):
+        return f"{clean_raw_text(row.get('raw_text', ''))}\n{row['external_url']}"
+    return f"I found a match, but it does not have a Notion URL: {clean_raw_text(row.get('raw_text', ''))}"
+
+
+def clean_raw_text(text: str) -> str:
+    for prefix in ("/task ", "/note ", "/link ", "/remind ", "/event "):
+        if text.lower().startswith(prefix):
+            return text[len(prefix) :].strip()
+    return text.strip()
+
+
+def append_today_items(base: str, today: dict | None) -> str:
+    if not today:
+        return base
+    items = today.get("items", [])
+    if not items:
+        return f"{base}\n\nToday: no scheduled items."
+    lines = [base, "", "Today:"]
+    for item in items[:5]:
+        payload = item.get("parsed_payload") or {}
+        when = payload.get("datetime") or payload.get("date") or "today"
+        lines.append(f"- {item['intent']}: {item.get('raw_text', '').strip()} ({when})")
     return "\n".join(lines)

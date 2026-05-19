@@ -43,4 +43,5 @@ def telegram_message_from_update(update: dict[str, Any], *, tz) -> TelegramMessa
         user_id=int(from_user["id"]),
         text=str(text),
         received_at=datetime.fromtimestamp(int(message.get("date", 0)), tz=tz),
+        chat_type=str(chat.get("type", "private")),
     )

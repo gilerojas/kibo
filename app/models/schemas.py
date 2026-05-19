@@ -5,12 +5,18 @@ from typing import Any
 
 
 class Intent(StrEnum):
+    START = "start"
     NOTE = "note"
     TASK = "task"
     LINK = "link"
     REMINDER = "reminder"
     EVENT = "event"
     SUMMARY = "summary"
+    TODAY = "today"
+    WEEK = "week"
+    SEARCH = "search"
+    OPEN = "open"
+    DONE = "done"
     HELP = "help"
     UNKNOWN = "unknown"
 
@@ -29,6 +35,7 @@ class ParsedCommand:
     body: str = ""
     parsed_payload: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    needs_clarification: bool = False
 
 
 @dataclass(frozen=True)
@@ -39,6 +46,7 @@ class TelegramMessage:
     user_id: int
     text: str
     received_at: datetime
+    chat_type: str = "private"
 
 
 @dataclass(frozen=True)

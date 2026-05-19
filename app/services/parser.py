@@ -6,7 +6,18 @@ from datetime import datetime, timedelta
 from app.models.schemas import Intent, ParsedCommand
 
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
-TIME_RE = re.compile(r"\b(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?\b", re.IGNORECASE)
+AMPM_TIME_RE = re.compile(r"\b(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)\b", re.IGNORECASE)
+AT_TIME_RE = re.compile(r"\bat\s+(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))\b", re.IGNORECASE)
+TIME_RANGE_RE = re.compile(
+    r"\bfrom\s+(?P<start_hour>\d{1,2})(?::(?P<start_minute>\d{2}))?\s*(?P<start_ampm>am|pm)?\s+to\s+(?P<end_hour>\d{1,2})(?::(?P<end_minute>\d{2}))?\s*(?P<end_ampm>am|pm)?\b",
+    re.IGNORECASE,
+)
+TASK_VERB_RE = re.compile(
+    r"^(call|pay|send|review|check|buy|email|message|follow up|follow-up|prepare|finish|submit|renew)\b",
+    re.IGNORECASE,
+)
+EVENT_RE = re.compile(r"\b(schedule|meeting|meet|call with|appointment|event)\b", re.IGNORECASE)
+REMINDER_RE = re.compile(r"\b(remind me|reminder|remember to)\b", re.IGNORECASE)
 WEEKDAYS = {
     "monday": 0,
     "tuesday": 1,
@@ -19,12 +30,18 @@ WEEKDAYS = {
 
 
 COMMANDS = {
+    "/start": Intent.START,
     "/note": Intent.NOTE,
     "/task": Intent.TASK,
     "/link": Intent.LINK,
     "/remind": Intent.REMINDER,
     "/event": Intent.EVENT,
     "/summary": Intent.SUMMARY,
+    "/today": Intent.TODAY,
+    "/week": Intent.WEEK,
+    "/search": Intent.SEARCH,
+    "/open": Intent.OPEN,
+    "/done": Intent.DONE,
     "/help": Intent.HELP,
 }
 
@@ -35,8 +52,28 @@ HELP_TEXT = """Kibo commands:
 /link <url or text>
 /remind <text>
 /event <text>
+/today
+/week
+/search <query>
+/open <query>
+/done <query>
 /summary today
 /help"""
+
+START_TEXT = """Kibo is ready.
+
+Use these commands:
+/note <text>
+/task <text>
+/link <url or text>
+/remind <text>
+/event <text>
+/today
+/week
+/search <query>
+/open <query>
+/done <query>
+/summary today"""
 
 
 def parse_command(text: str, *, now: datetime | None = None) -> ParsedCommand:
@@ -49,10 +86,15 @@ def parse_command(text: str, *, now: datetime | None = None) -> ParsedCommand:
     body = body.strip()
     intent = COMMANDS.get(command)
     if intent is None:
-        return ParsedCommand(Intent.UNKNOWN, text, body=raw_text, error="Unknown command. Try /help.")
+        return parse_natural_command(raw_text, now=now)
 
-    if intent == Intent.HELP:
+    if intent in {Intent.START, Intent.HELP, Intent.TODAY, Intent.WEEK}:
         return ParsedCommand(intent, text, body=body)
+
+    if intent in {Intent.SEARCH, Intent.OPEN, Intent.DONE}:
+        if not body:
+            return ParsedCommand(intent, text, error=f"{command} needs search text after the command.")
+        return ParsedCommand(intent, text, body=body, parsed_payload={"query": body})
 
     if intent == Intent.SUMMARY:
         period = body.lower() or "today"
@@ -74,6 +116,58 @@ def parse_command(text: str, *, now: datetime | None = None) -> ParsedCommand:
     return ParsedCommand(intent, text, body=body, parsed_payload=payload)
 
 
+def parse_natural_command(raw_text: str, *, now: datetime | None = None) -> ParsedCommand:
+    lower = raw_text.lower().strip()
+    schedule = extract_simple_schedule(raw_text, now=now)
+
+    if URL_RE.search(raw_text):
+        payload: dict[str, object] = {"text": raw_text, "url": URL_RE.search(raw_text).group(0)}
+        return ParsedCommand(Intent.LINK, raw_text, body=raw_text, parsed_payload=payload)
+
+    if lower.startswith(("idea:", "idea ")):
+        body = raw_text.split(":", 1)[1].strip() if ":" in raw_text else raw_text[5:].strip()
+        return ParsedCommand(Intent.NOTE, raw_text, body=body, parsed_payload={"text": body})
+
+    if lower.startswith(("note:", "nota:")):
+        body = raw_text.split(":", 1)[1].strip()
+        return ParsedCommand(Intent.NOTE, raw_text, body=body, parsed_payload={"text": body})
+
+    if REMINDER_RE.search(lower):
+        body = clean_reminder_text(raw_text)
+        payload = {"text": body, **schedule}
+        if "datetime" not in payload and "date" not in payload:
+            return ParsedCommand(
+                Intent.UNKNOWN,
+                raw_text,
+                body=raw_text,
+                error="I can create a reminder, but I need a date or time. Try: remind me tomorrow at 9am to review invoices.",
+                needs_clarification=True,
+            )
+        return ParsedCommand(Intent.REMINDER, raw_text, body=body, parsed_payload=payload)
+
+    if EVENT_RE.search(lower) and schedule:
+        return ParsedCommand(Intent.EVENT, raw_text, body=raw_text, parsed_payload={"text": raw_text, **schedule})
+
+    if TASK_VERB_RE.search(lower):
+        return ParsedCommand(Intent.TASK, raw_text, body=raw_text, parsed_payload={"text": raw_text, **schedule})
+
+    return ParsedCommand(
+        Intent.UNKNOWN,
+        raw_text,
+        body=raw_text,
+        error="I am not sure whether this is a note, task, link, reminder, or event. Use /note, /task, /link, /remind, or /event.",
+        needs_clarification=True,
+    )
+
+
+def clean_reminder_text(text: str) -> str:
+    cleaned = re.sub(r"^\s*remind me\s+", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\s*remember to\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\s*reminder[:\s]+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bto\s+", "", cleaned, count=1, flags=re.IGNORECASE)
+    return cleaned.strip() or text.strip()
+
+
 def extract_simple_schedule(text: str, *, now: datetime | None = None) -> dict[str, object]:
     now = now or datetime.now()
     lower = text.lower()
@@ -93,23 +187,54 @@ def extract_simple_schedule(text: str, *, now: datetime | None = None) -> dict[s
                 break
 
     result: dict[str, object] = {}
+    range_match = TIME_RANGE_RE.search(lower)
+    time_match = range_match or AMPM_TIME_RE.search(lower) or AT_TIME_RE.search(lower)
+    if date_value is None and time_match is not None:
+        date_value = now.date()
+
     if date_value is not None:
         result["date"] = date_value.isoformat()
 
-    time_match = TIME_RE.search(lower)
+    if range_match and date_value is not None:
+        start_hour, start_minute = normalize_hour(
+            int(range_match.group("start_hour")),
+            int(range_match.group("start_minute") or "0"),
+            range_match.group("start_ampm") or range_match.group("end_ampm"),
+        )
+        end_hour, end_minute = normalize_hour(
+            int(range_match.group("end_hour")),
+            int(range_match.group("end_minute") or "0"),
+            range_match.group("end_ampm") or range_match.group("start_ampm"),
+        )
+        if 0 <= start_hour <= 23 and 0 <= start_minute <= 59 and 0 <= end_hour <= 23 and 0 <= end_minute <= 59:
+            result["datetime"] = datetime.combine(date_value, datetime.min.time(), tzinfo=now.tzinfo).replace(
+                hour=start_hour,
+                minute=start_minute,
+            ).isoformat()
+            result["end_datetime"] = datetime.combine(date_value, datetime.min.time(), tzinfo=now.tzinfo).replace(
+                hour=end_hour,
+                minute=end_minute,
+            ).isoformat()
+        return result
+
     if time_match and date_value is not None:
         hour = int(time_match.group("hour"))
         minute = int(time_match.group("minute") or "0")
-        ampm = time_match.group("ampm")
-        if ampm:
-            if ampm.lower() == "pm" and hour < 12:
-                hour += 12
-            if ampm.lower() == "am" and hour == 12:
-                hour = 0
+        ampm = time_match.groupdict().get("ampm")
+        hour, minute = normalize_hour(hour, minute, ampm)
         if 0 <= hour <= 23 and 0 <= minute <= 59:
-            result["datetime"] = datetime.combine(date_value, datetime.min.time()).replace(
+            result["datetime"] = datetime.combine(date_value, datetime.min.time(), tzinfo=now.tzinfo).replace(
                 hour=hour,
                 minute=minute,
             ).isoformat()
 
     return result
+
+
+def normalize_hour(hour: int, minute: int, ampm: str | None) -> tuple[int, int]:
+    if ampm:
+        if ampm.lower() == "pm" and hour < 12:
+            hour += 12
+        if ampm.lower() == "am" and hour == 12:
+            hour = 0
+    return hour, minute

@@ -114,6 +114,30 @@ class SupabaseRepository:
             conn.commit()
             return row["id"]
 
+    def create_reminder(
+        self,
+        *,
+        command_id: UUID,
+        user_id: UUID,
+        telegram_chat_id: int,
+        title: str,
+        reminder_at: datetime,
+        notion_url: str | None,
+    ) -> UUID:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                insert into kibo.reminders (
+                    command_id, user_id, telegram_chat_id, title, reminder_at, notion_url
+                )
+                values (%s, %s, %s, %s, %s, %s)
+                returning id
+                """,
+                (command_id, user_id, telegram_chat_id, title, reminder_at, notion_url),
+            ).fetchone()
+            conn.commit()
+            return row["id"]
+
     def summary_for_day(self, user_id: UUID, day: date) -> dict[str, Any]:
         start = datetime.combine(day, datetime.min.time())
         end = datetime.combine(day + date.resolution, datetime.min.time())
@@ -129,3 +153,174 @@ class SupabaseRepository:
                 (user_id, start, end),
             ).fetchall()
         return {"date": day.isoformat(), "counts": rows}
+
+    def today_items(self, user_id: UUID, day: date) -> dict[str, Any]:
+        day_text = day.isoformat()
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select c.intent, c.raw_text, c.parsed_payload, c.created_at, a.external_url
+                from kibo.commands c
+                left join lateral (
+                    select external_url
+                    from kibo.actions
+                    where command_id = c.id and destination = 'notion' and status = 'succeeded'
+                    order by created_at desc
+                    limit 1
+                ) a on true
+                where c.user_id = %s
+                  and c.status = 'processed'
+                  and c.intent in ('task', 'reminder', 'event')
+                  and (
+                    c.parsed_payload ->> 'date' = %s
+                    or left(coalesce(c.parsed_payload ->> 'datetime', ''), 10) = %s
+                  )
+                order by
+                  coalesce(c.parsed_payload ->> 'datetime', c.parsed_payload ->> 'date') asc,
+                  c.created_at asc
+                """,
+                (user_id, day_text, day_text),
+            ).fetchall()
+        return {"date": day_text, "items": rows}
+
+    def upcoming_items(self, user_id: UUID, start_day: date, end_day: date) -> dict[str, Any]:
+        start_text = start_day.isoformat()
+        end_text = end_day.isoformat()
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select c.intent, c.raw_text, c.parsed_payload, c.created_at, a.external_url
+                from kibo.commands c
+                left join lateral (
+                    select external_url
+                    from kibo.actions
+                    where command_id = c.id and destination = 'notion' and status = 'succeeded'
+                    order by created_at desc
+                    limit 1
+                ) a on true
+                where c.user_id = %s
+                  and c.status = 'processed'
+                  and c.intent in ('task', 'reminder', 'event')
+                  and (
+                    c.parsed_payload ->> 'date' between %s and %s
+                    or left(coalesce(c.parsed_payload ->> 'datetime', ''), 10) between %s and %s
+                  )
+                order by
+                  coalesce(c.parsed_payload ->> 'datetime', c.parsed_payload ->> 'date') asc,
+                  c.created_at asc
+                """,
+                (user_id, start_text, end_text, start_text, end_text),
+            ).fetchall()
+        return {"start_date": start_text, "end_date": end_text, "items": rows}
+
+    def search_items(self, user_id: UUID, query: str, *, limit: int = 8) -> list[dict[str, Any]]:
+        pattern = f"%{query}%"
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select c.id as command_id, c.intent, c.raw_text, c.parsed_payload, c.created_at,
+                       a.external_id, a.external_url
+                from kibo.commands c
+                left join lateral (
+                    select external_id, external_url
+                    from kibo.actions
+                    where command_id = c.id and destination = 'notion' and status = 'succeeded'
+                    order by created_at desc
+                    limit 1
+                ) a on true
+                where c.user_id = %s
+                  and c.status = 'processed'
+                  and c.intent in ('note', 'task', 'link', 'reminder', 'event')
+                  and (
+                    c.raw_text ilike %s
+                    or c.parsed_payload ->> 'text' ilike %s
+                  )
+                order by c.created_at desc
+                limit %s
+                """,
+                (user_id, pattern, pattern, limit),
+            ).fetchall()
+        return list(rows)
+
+    def best_open_item(self, user_id: UUID, query: str) -> dict[str, Any] | None:
+        rows = self.search_items(user_id, query, limit=1)
+        return rows[0] if rows else None
+
+    def best_completable_item(self, user_id: UUID, query: str) -> dict[str, Any] | None:
+        pattern = f"%{query}%"
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                select c.id as command_id, c.intent, c.raw_text, c.parsed_payload, c.created_at,
+                       a.external_id, a.external_url
+                from kibo.commands c
+                join lateral (
+                    select external_id, external_url
+                    from kibo.actions
+                    where command_id = c.id and destination = 'notion' and status = 'succeeded'
+                    order by created_at desc
+                    limit 1
+                ) a on true
+                where c.user_id = %s
+                  and c.status = 'processed'
+                  and c.intent in ('task', 'reminder', 'event')
+                  and (
+                    c.raw_text ilike %s
+                    or c.parsed_payload ->> 'text' ilike %s
+                  )
+                order by c.created_at desc
+                limit 1
+                """,
+                (user_id, pattern, pattern),
+            ).fetchone()
+        return row
+
+    def mark_reminder_done_for_command(self, command_id: UUID) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                update kibo.reminders
+                set status = 'done', sent_at = coalesce(sent_at, now())
+                where command_id = %s and status in ('scheduled', 'sent')
+                """,
+                (command_id,),
+            )
+            conn.commit()
+
+    def due_reminders(self, now: datetime, *, limit: int = 10) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select id, telegram_chat_id, title, reminder_at, notion_url
+                from kibo.reminders
+                where status = 'scheduled' and reminder_at <= %s
+                order by reminder_at asc
+                limit %s
+                """,
+                (now, limit),
+            ).fetchall()
+        return list(rows)
+
+    def mark_reminder_sent(self, reminder_id: UUID) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                update kibo.reminders
+                set status = 'sent', sent_at = now()
+                where id = %s and status = 'scheduled'
+                """,
+                (reminder_id,),
+            )
+            conn.commit()
+
+    def mark_reminder_failed(self, reminder_id: UUID, error_message: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                update kibo.reminders
+                set error_message = %s
+                where id = %s
+                """,
+                (error_message[:1000], reminder_id),
+            )
+            conn.commit()

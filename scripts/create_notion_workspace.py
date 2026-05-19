@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import requests
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
-NOTION_VERSION = os.getenv("NOTION_API_VERSION", "2022-06-28")
+from app.config import load_dotenv_file
 
 
 def main() -> int:
+    load_dotenv_file(str(PROJECT_ROOT / ".env"))
     token = os.getenv("NOTION_API_KEY")
     parent_page_id = os.getenv("KIBO_NOTION_PARENT_PAGE_ID")
     if not token or not parent_page_id:
@@ -36,13 +40,14 @@ class NotionSetupClient:
     def __init__(self, token: str):
         self.token = token
         self.parent_page_id = os.environ["KIBO_NOTION_PARENT_PAGE_ID"]
+        self.notion_version = os.getenv("NOTION_API_VERSION", "2022-06-28")
 
     def create_database(self, title: str, properties: dict[str, Any]) -> str:
         response = requests.post(
             "https://api.notion.com/v1/databases",
             headers={
                 "Authorization": f"Bearer {self.token}",
-                "Notion-Version": NOTION_VERSION,
+                "Notion-Version": self.notion_version,
                 "Content-Type": "application/json",
             },
             json={

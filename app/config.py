@@ -12,6 +12,8 @@ class Settings:
     telegram_bot_token: str = ""
     telegram_allowed_user_ids: str = ""
     telegram_poll_timeout_seconds: int = 25
+    telegram_webhook_secret: str = ""
+    app_base_url: str = ""
 
     supabase_database_url: str = ""
 
@@ -22,6 +24,8 @@ class Settings:
     notion_schedule_database_id: str = ""
     notion_logs_database_id: str = ""
     notion_api_version: str = "2022-06-28"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-haiku-4-5-20251001"
 
     @property
     def allowed_user_ids(self) -> set[int]:
@@ -65,6 +69,8 @@ def get_settings() -> Settings:
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
         telegram_allowed_user_ids=os.getenv("TELEGRAM_ALLOWED_USER_IDS", ""),
         telegram_poll_timeout_seconds=int(os.getenv("TELEGRAM_POLL_TIMEOUT_SECONDS", "25")),
+        telegram_webhook_secret=os.getenv("TELEGRAM_WEBHOOK_SECRET", ""),
+        app_base_url=os.getenv("APP_BASE_URL", ""),
         supabase_database_url=os.getenv("SUPABASE_DATABASE_URL", ""),
         notion_api_key=os.getenv("NOTION_API_KEY", ""),
         notion_inbox_database_id=os.getenv("NOTION_INBOX_DATABASE_ID", ""),
@@ -73,6 +79,8 @@ def get_settings() -> Settings:
         notion_schedule_database_id=os.getenv("NOTION_SCHEDULE_DATABASE_ID", ""),
         notion_logs_database_id=os.getenv("NOTION_LOGS_DATABASE_ID", ""),
         notion_api_version=os.getenv("NOTION_API_VERSION", "2022-06-28"),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+        anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
     )
 
 

@@ -52,6 +52,21 @@ create table if not exists kibo.notion_objects (
     created_at timestamptz not null default now()
 );
 
+create table if not exists kibo.reminders (
+    id uuid primary key default gen_random_uuid(),
+    command_id uuid not null references kibo.commands(id) on delete cascade,
+    user_id uuid not null references kibo.users(id) on delete cascade,
+    telegram_chat_id bigint not null,
+    title text not null,
+    reminder_at timestamptz not null,
+    status text not null default 'scheduled',
+    notion_url text,
+    created_at timestamptz not null default now(),
+    sent_at timestamptz,
+    cancelled_at timestamptz,
+    error_message text
+);
+
 create index if not exists users_telegram_user_id_idx
     on kibo.users (telegram_user_id);
 
@@ -66,3 +81,9 @@ create index if not exists actions_command_id_idx
 
 create index if not exists notion_objects_command_id_idx
     on kibo.notion_objects (command_id);
+
+create index if not exists reminders_status_due_idx
+    on kibo.reminders (status, reminder_at);
+
+create index if not exists reminders_user_due_idx
+    on kibo.reminders (user_id, reminder_at desc);

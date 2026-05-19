@@ -20,8 +20,8 @@ The runtime app expects each database to have the exact property names below.
 
 Recommended views:
 
-- `All Tasks`: table
 - `Task Board`: board grouped by `Status`
+- `Open Tasks`: table sorted by `Due Date`
 
 ## Kibo Links
 
@@ -54,3 +54,23 @@ Recommended views:
 The connected Notion plugin can create these databases once the parent page URL/ID is available. After creation, copy each database ID into `.env`.
 
 The official Notion CLI (`ntn`) can also inspect and manage the workspace, but it is not required by the runtime app.
+
+## Phase 2 dashboard baseline
+
+The `KIBO COMMAND CENTER` parent page should include linked database views:
+
+- `Dashboard - Inbox`
+- `Dashboard - Tasks`
+- `Dashboard - Schedule`
+- `Dashboard - Read Later`
+- `Dashboard - Logs`
+
+The source databases should include these view tabs:
+
+- `Kibo Inbox`: `Recent Notes`
+- `Kibo Tasks`: `Task Board`, `Open Tasks`
+- `Kibo Links`: `Read Later`, `Archive`
+- `Kibo Schedule`: `Calendar`, `Upcoming`
+- `Kibo Logs`: `Summaries`, `Errors`
+
+Some view filters may need manual refinement in Notion because Notion status-filter support through the connector DSL can be limited. The important baseline is that the dashboard page now exposes the core operating databases directly.

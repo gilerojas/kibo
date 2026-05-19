@@ -59,6 +59,24 @@ class NotionService:
         data = response.json()
         return ActionResult("notion", "summary_log", "succeeded", external_id=data.get("id"), external_url=data.get("url"))
 
+    def mark_done(self, page_id: str, intent: Intent) -> ActionResult:
+        response = requests.patch(
+            f"{self.base_url}/pages/{page_id}",
+            headers=self._headers(),
+            json={"properties": {"Status": {"status": {"name": "Done"}}}},
+            timeout=20,
+        )
+        if response.status_code >= 400:
+            return ActionResult(
+                "notion",
+                "done",
+                "failed",
+                external_id=page_id,
+                error_message=f"Notion API returned {response.status_code}",
+            )
+        data = response.json()
+        return ActionResult("notion", "done", "succeeded", external_id=data.get("id"), external_url=data.get("url"))
+
     def _database_for_intent(self, intent: Intent) -> str:
         mapping = {
             Intent.NOTE: self.settings.notion_inbox_database_id,
@@ -109,7 +127,10 @@ class NotionService:
                 "Source": {"select": {"name": "Telegram"}},
             }
             if payload.get("datetime"):
-                props["Scheduled For"] = {"date": {"start": str(payload["datetime"])}}
+                date_value = {"start": str(payload["datetime"])}
+                if payload.get("end_datetime"):
+                    date_value["end"] = str(payload["end_datetime"])
+                props["Scheduled For"] = {"date": date_value}
             elif payload.get("date"):
                 props["Scheduled For"] = {"date": {"start": str(payload["date"])}}
             return props
