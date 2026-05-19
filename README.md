@@ -46,6 +46,12 @@ cp .env.example .env
 
 5. Create the Notion databases under a Kibo parent page and put their database IDs in `.env`.
 
+```bash
+export NOTION_API_KEY=secret_xxx
+export KIBO_NOTION_PARENT_PAGE_ID=your_parent_page_id
+python scripts/create_notion_workspace.py
+```
+
 6. Run the polling bot.
 
 ```bash
