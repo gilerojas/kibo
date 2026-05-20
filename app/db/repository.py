@@ -230,7 +230,7 @@ class SupabaseRepository:
                 ) a on true
                 where c.user_id = %s
                   and c.status = 'processed'
-                  and c.intent in ('note', 'task', 'link', 'reminder', 'event')
+                  and c.intent in ('note', 'task', 'link', 'book', 'reminder', 'event')
                   and (
                     c.raw_text ilike %s
                     or c.parsed_payload ->> 'text' ilike %s

@@ -7,6 +7,7 @@ The current MVP is intentionally command-first:
 - `/note <text>` saves an inbox note in Notion.
 - `/task <text>` saves a task in Notion.
 - `/link <url or text>` saves a read-later item in Notion.
+- `/book <title or recommendation>` saves a book recommendation in Notion.
 - `/remind <text>` saves a scheduled reminder in Notion.
 - `/event <text>` saves a scheduled event in Notion.
 - `/today` shows today's tasks, events, and reminders.

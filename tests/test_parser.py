@@ -30,6 +30,19 @@ def test_parse_link_extracts_url() -> None:
     assert parsed.parsed_payload["url"] == "https://example.com"
 
 
+def test_parse_book() -> None:
+    parsed = parse_command("/book The Beginning of Infinity")
+    assert parsed.intent == Intent.BOOK
+    assert parsed.body == "The Beginning of Infinity"
+    assert parsed.parsed_payload["text"] == "The Beginning of Infinity"
+
+
+def test_parse_natural_book_prefix() -> None:
+    parsed = parse_command("book: The Almanack of Naval Ravikant")
+    assert parsed.intent == Intent.BOOK
+    assert parsed.body == "The Almanack of Naval Ravikant"
+
+
 def test_parse_reminder_datetime() -> None:
     now = datetime(2026, 5, 18, 12, 0)
     parsed = parse_command("/remind Review invoices Friday at 9am", now=now)

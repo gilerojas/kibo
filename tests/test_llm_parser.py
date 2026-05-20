@@ -116,3 +116,26 @@ def test_llm_parser_accepts_multi_item_tasks() -> None:
         {"text": "Create agent for AI and understand it", "date": "2026-05-20"},
         {"text": "Finish sophIA", "date": "2026-05-20"},
     ]
+
+
+def test_llm_parser_accepts_book_recommendation() -> None:
+    parsed = parsed_command_from_llm_json(
+        "someone recommended The Beginning of Infinity",
+        """
+        {
+          "intent": "book",
+          "confidence": 0.92,
+          "title": "The Beginning of Infinity",
+          "items": null,
+          "date": null,
+          "datetime": null,
+          "url": null,
+          "needs_clarification": false,
+          "clarification_question": null
+        }
+        """,
+        model="test-model",
+    )
+
+    assert parsed.intent == Intent.BOOK
+    assert parsed.body == "The Beginning of Infinity"

@@ -21,6 +21,21 @@ def test_schedule_event_includes_end_datetime() -> None:
     assert props["Scheduled For"]["date"]["end"] == "2026-05-19T19:00:00-04:00"
 
 
+def test_book_uses_inbox_book_type() -> None:
+    service = NotionService(Settings())
+
+    props = service._properties_for_intent(
+        Intent.BOOK,
+        "The Beginning of Infinity",
+        {"text": "The Beginning of Infinity"},
+        "/book The Beginning of Infinity",
+    )
+
+    assert props["Name"]["title"][0]["text"]["content"] == "The Beginning of Infinity"
+    assert props["Type"]["select"]["name"] == "Book"
+    assert props["Source"]["select"]["name"] == "Telegram"
+
+
 def test_mark_done_payload(monkeypatch) -> None:
     captured = {}
 

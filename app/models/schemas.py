@@ -9,6 +9,7 @@ class Intent(StrEnum):
     NOTE = "note"
     TASK = "task"
     LINK = "link"
+    BOOK = "book"
     REMINDER = "reminder"
     EVENT = "event"
     SUMMARY = "summary"

@@ -17,6 +17,7 @@ BOT_COMMANDS = [
     {"command": "note", "description": "Save a note to Notion"},
     {"command": "task", "description": "Create a task"},
     {"command": "link", "description": "Save a read-later link"},
+    {"command": "book", "description": "Save a book recommendation"},
     {"command": "remind", "description": "Create a reminder"},
     {"command": "event", "description": "Create a scheduled event"},
     {"command": "summary", "description": "Show today's capture summary"},

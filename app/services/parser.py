@@ -34,6 +34,7 @@ COMMANDS = {
     "/note": Intent.NOTE,
     "/task": Intent.TASK,
     "/link": Intent.LINK,
+    "/book": Intent.BOOK,
     "/remind": Intent.REMINDER,
     "/event": Intent.EVENT,
     "/summary": Intent.SUMMARY,
@@ -50,6 +51,7 @@ HELP_TEXT = """Kibo commands:
 /note <text>
 /task <text>
 /link <url or text>
+/book <title or recommendation>
 /remind <text>
 /event <text>
 /today
@@ -66,6 +68,7 @@ Use these commands:
 /note <text>
 /task <text>
 /link <url or text>
+/book <title or recommendation>
 /remind <text>
 /event <text>
 /today
@@ -106,7 +109,7 @@ def parse_command(text: str, *, now: datetime | None = None) -> ParsedCommand:
         return ParsedCommand(intent, text, error=f"{command} needs text after the command.")
 
     payload: dict[str, object] = {"text": body}
-    if intent == Intent.LINK:
+    if intent in {Intent.LINK, Intent.BOOK}:
         match = URL_RE.search(body)
         if match:
             payload["url"] = match.group(0)
@@ -131,6 +134,14 @@ def parse_natural_command(raw_text: str, *, now: datetime | None = None) -> Pars
     if lower.startswith(("note:", "nota:")):
         body = raw_text.split(":", 1)[1].strip()
         return ParsedCommand(Intent.NOTE, raw_text, body=body, parsed_payload={"text": body})
+
+    if lower.startswith(("book:", "libro:")):
+        body = raw_text.split(":", 1)[1].strip()
+        payload = {"text": body}
+        match = URL_RE.search(body)
+        if match:
+            payload["url"] = match.group(0)
+        return ParsedCommand(Intent.BOOK, raw_text, body=body, parsed_payload=payload)
 
     if REMINDER_RE.search(lower):
         body = clean_reminder_text(raw_text)

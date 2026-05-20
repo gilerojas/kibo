@@ -119,7 +119,7 @@ class KiboHandler:
             self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
             return response
 
-        if parsed.intent in {Intent.NOTE, Intent.TASK, Intent.LINK, Intent.REMINDER, Intent.EVENT}:
+        if parsed.intent in {Intent.NOTE, Intent.TASK, Intent.LINK, Intent.BOOK, Intent.REMINDER, Intent.EVENT}:
             item_payloads = expanded_item_payloads(parsed.parsed_payload)
             results: list[tuple[dict, ActionResult]] = []
             for payload in item_payloads:
@@ -202,6 +202,7 @@ def confirmation_for(intent: Intent, body: str, url: str | None) -> str:
         Intent.NOTE: "Saved note",
         Intent.TASK: "Created task",
         Intent.LINK: "Saved link",
+        Intent.BOOK: "Saved book",
         Intent.REMINDER: "Created reminder",
         Intent.EVENT: "Created event",
     }[intent]
@@ -214,6 +215,7 @@ def multi_confirmation_for(intent: Intent, results: list[tuple[dict, ActionResul
         Intent.NOTE: "notes",
         Intent.TASK: "tasks",
         Intent.LINK: "links",
+        Intent.BOOK: "books",
         Intent.REMINDER: "reminders",
         Intent.EVENT: "events",
     }[intent]

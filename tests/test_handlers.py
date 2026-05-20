@@ -151,6 +151,19 @@ def test_handler_creates_note() -> None:
     assert repo.actions[0].status == "succeeded"
 
 
+def test_handler_creates_book() -> None:
+    repo = FakeRepository()
+    notion = FakeNotion()
+    settings = Settings(telegram_allowed_user_ids="123")
+    handler = KiboHandler(settings, repo, notion)
+
+    response = handler.handle(make_message("/book The Beginning of Infinity"))
+
+    assert response.startswith("Saved book: The Beginning of Infinity")
+    assert notion.created[0][0].value == "book"
+    assert repo.actions[0].status == "succeeded"
+
+
 def test_handler_rejects_unauthorized_user() -> None:
     repo = FakeRepository()
     notion = FakeNotion()

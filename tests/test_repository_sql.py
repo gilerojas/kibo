@@ -26,4 +26,4 @@ def test_search_items_excludes_control_intents(monkeypatch) -> None:
 
     repo.search_items("00000000-0000-0000-0000-000000000000", "gym")
 
-    assert "c.intent in ('note', 'task', 'link', 'reminder', 'event')" in captured["query"]
+    assert "c.intent in ('note', 'task', 'link', 'book', 'reminder', 'event')" in captured["query"]

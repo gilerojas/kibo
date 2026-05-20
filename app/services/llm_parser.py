@@ -14,6 +14,7 @@ ALLOWED_INTENTS = {
     Intent.NOTE.value,
     Intent.TASK.value,
     Intent.LINK.value,
+    Intent.BOOK.value,
     Intent.REMINDER.value,
     Intent.EVENT.value,
     Intent.UNKNOWN.value,
@@ -32,7 +33,7 @@ class AnthropicParser:
 
     def parse(self, text: str, *, now: datetime) -> ParsedCommand:
         if not self.is_configured:
-            return clarification(text, "LLM parser is not configured. Use /note, /task, /link, /remind, or /event.")
+            return clarification(text, "LLM parser is not configured. Use /note, /task, /link, /book, /remind, or /event.")
 
         response = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -68,6 +69,7 @@ Allowed intents:
 - note
 - task
 - link
+- book
 - reminder
 - event
 - unknown
@@ -94,12 +96,13 @@ Schema:
 
 Rules:
 - Use link when the message contains a URL and is mainly for saving/reading later.
+- Use book when the message is a book recommendation, reading list item, or book to remember.
 - Use reminder only when the user wants Kibo to remind them. A reminder needs a date or datetime.
 - Use event for meetings, appointments, calls, or scheduled blocks with a date/time.
 - Use task for action items the user needs to do.
 - Use note for ideas, observations, or information to save.
 - Use unknown if the message is too vague.
-- If the message contains a bullet list or numbered list of multiple tasks, notes, links, reminders, or events with the same intent, return each entry in items.
+- If the message contains a bullet list or numbered list of multiple tasks, notes, links, books, reminders, or events with the same intent, return each entry in items.
 - Apply shared date/datetime context to all items when a phrase like tomorrow or Friday introduces the list.
 - If there is only one item, items can be null or omitted.
 - Convert relative dates like tomorrow, Friday, next Monday using the current datetime.
@@ -112,7 +115,7 @@ def parsed_command_from_llm_json(raw_text: str, content: str, *, model: str) -> 
     try:
         payload = json.loads(extract_json_object(content))
     except json.JSONDecodeError:
-        return clarification(raw_text, "I could not parse that reliably. Use /note, /task, /link, /remind, or /event.")
+        return clarification(raw_text, "I could not parse that reliably. Use /note, /task, /link, /book, /remind, or /event.")
 
     intent_value = str(payload.get("intent", "unknown")).lower()
     if intent_value not in ALLOWED_INTENTS:
@@ -120,7 +123,7 @@ def parsed_command_from_llm_json(raw_text: str, content: str, *, model: str) -> 
 
     confidence = float(payload.get("confidence") or 0)
     needs_clarification = bool(payload.get("needs_clarification")) or confidence < 0.8 or intent_value == Intent.UNKNOWN.value
-    question = payload.get("clarification_question") or "I am not sure what to do with this. Should it be a note, task, link, reminder, or event?"
+    question = payload.get("clarification_question") or "I am not sure what to do with this. Should it be a note, task, link, book, reminder, or event?"
 
     body = str(payload.get("title") or raw_text).strip()
     parsed_payload: dict[str, Any] = {

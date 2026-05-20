@@ -82,6 +82,7 @@ class NotionService:
             Intent.NOTE: self.settings.notion_inbox_database_id,
             Intent.TASK: self.settings.notion_tasks_database_id,
             Intent.LINK: self.settings.notion_links_database_id,
+            Intent.BOOK: self.settings.notion_inbox_database_id,
             Intent.REMINDER: self.settings.notion_schedule_database_id,
             Intent.EVENT: self.settings.notion_schedule_database_id,
         }
@@ -118,6 +119,14 @@ class NotionService:
             }
             if payload.get("url"):
                 props["URL"] = {"url": str(payload["url"])}
+            return props
+        if intent == Intent.BOOK:
+            props = {
+                "Name": {"title": [{"text": {"content": title[:2000]}}]},
+                "Type": {"select": {"name": "Book"}},
+                "Content": {"rich_text": [{"text": {"content": raw_text[:1900]}}]},
+                "Source": {"select": {"name": "Telegram"}},
+            }
             return props
         if intent in {Intent.REMINDER, Intent.EVENT}:
             props = {
