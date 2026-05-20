@@ -5,6 +5,7 @@ from functools import lru_cache
 from app.bot.telegram_client import TelegramClient
 from app.config import get_settings
 from app.db.repository import SupabaseRepository
+from app.services.google_calendar_service import GoogleCalendarService
 from app.services.handlers import KiboHandler
 from app.services.notion_service import NotionService
 
@@ -15,5 +16,5 @@ def get_runtime() -> tuple[TelegramClient, KiboHandler]:
     settings.require_runtime()
     telegram = TelegramClient(settings.telegram_bot_token)
     repository = SupabaseRepository(settings)
-    handler = KiboHandler(settings, repository, NotionService(settings))
+    handler = KiboHandler(settings, repository, NotionService(settings), calendar=GoogleCalendarService(settings))
     return telegram, handler

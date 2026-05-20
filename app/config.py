@@ -26,6 +26,11 @@ class Settings:
     notion_api_version: str = "2022-06-28"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-4-5-20251001"
+    google_calendar_client_id: str = ""
+    google_calendar_client_secret: str = ""
+    google_calendar_refresh_token: str = ""
+    google_calendar_id: str = "primary"
+    google_calendar_reminder_minutes: str = "30,0"
 
     @property
     def allowed_user_ids(self) -> set[int]:
@@ -81,6 +86,11 @@ def get_settings() -> Settings:
         notion_api_version=os.getenv("NOTION_API_VERSION", "2022-06-28"),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
+        google_calendar_client_id=os.getenv("GOOGLE_CALENDAR_CLIENT_ID", ""),
+        google_calendar_client_secret=os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET", ""),
+        google_calendar_refresh_token=os.getenv("GOOGLE_CALENDAR_REFRESH_TOKEN", ""),
+        google_calendar_id=os.getenv("GOOGLE_CALENDAR_ID", "primary"),
+        google_calendar_reminder_minutes=os.getenv("GOOGLE_CALENDAR_REMINDER_MINUTES", "30,0"),
     )
 
 

@@ -116,6 +116,7 @@ python scripts/set_telegram_webhook.py
 
 - Product blueprint: `docs/kibo_app_blueprint.md`
 - Notion CLI overview: `docs/notion-cli-ntn-overview.md`
+- Google Calendar setup: `docs/google-calendar-setup.md`
 - Render deployment: `docs/render-deploy.md`
 
 ## License

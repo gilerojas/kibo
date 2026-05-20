@@ -15,11 +15,13 @@ class KiboHandler:
         settings: Settings,
         repository,
         notion,
+        calendar=None,
         llm_parser=None,
     ):
         self.settings = settings
         self.repository = repository
         self.notion = notion
+        self.calendar = calendar
         self.llm_parser = llm_parser or AnthropicParser(settings)
 
     def handle(self, message: TelegramMessage) -> str:
@@ -127,6 +129,14 @@ class KiboHandler:
                 result = self.notion.create_for_intent(parsed.intent, payload, item_text)
                 self.repository.create_action(command_id=command_id, user_id=user_id, result=result)
                 results.append((payload, result))
+                if result.status == "succeeded" and self.calendar:
+                    calendar_result = self.calendar.create_for_intent(parsed.intent, payload, item_text)
+                    if calendar_result:
+                        self.repository.create_action(command_id=command_id, user_id=user_id, result=calendar_result)
+                        if calendar_result.status == "succeeded" and calendar_result.external_url:
+                            payload["_calendar_url"] = calendar_result.external_url
+                        elif calendar_result.status != "succeeded":
+                            payload["_calendar_error"] = calendar_result.error_message or "Google Calendar event was not created"
                 if result.status == "succeeded" and parsed.intent == Intent.REMINDER and payload.get("datetime"):
                     reminder_at = datetime.fromisoformat(str(payload["datetime"]))
                     if reminder_at.tzinfo is None:
@@ -145,7 +155,12 @@ class KiboHandler:
                 if len(results) > 1:
                     return multi_confirmation_for(parsed.intent, results)
                 payload, result = results[0]
-                return confirmation_for(parsed.intent, str(payload.get("text") or parsed.body), result.external_url)
+                response = confirmation_for(parsed.intent, str(payload.get("text") or parsed.body), result.external_url)
+                if payload.get("_calendar_url"):
+                    response += f"\nCalendar: {payload['_calendar_url']}"
+                if payload.get("_calendar_error"):
+                    response += f"\nCalendar failed: {payload['_calendar_error']}"
+                return response
             self.repository.update_command_status(command_id, CommandStatus.FAILED, error_message=failed[0].error_message)
             return "I saved the command, but Notion could not create the item. Check the Notion integration and database IDs."
 
@@ -224,6 +239,10 @@ def multi_confirmation_for(intent: Intent, results: list[tuple[dict, ActionResul
         line = f"- {payload.get('text', '').strip()}"
         if result.external_url:
             line += f"\n  {result.external_url}"
+        if payload.get("_calendar_url"):
+            line += f"\n  Calendar: {payload['_calendar_url']}"
+        if payload.get("_calendar_error"):
+            line += f"\n  Calendar failed: {payload['_calendar_error']}"
         lines.append(line)
     return "\n".join(lines)
 

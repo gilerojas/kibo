@@ -126,6 +126,15 @@ class FakeLlmParser:
         return self.parsed[index]
 
 
+class FakeCalendar:
+    def __init__(self) -> None:
+        self.created = []
+
+    def create_for_intent(self, intent, payload, raw_text):
+        self.created.append((intent, payload, raw_text))
+        return ActionResult("google_calendar", intent.value, "succeeded", external_id="cal", external_url="https://calendar.google.com/event")
+
+
 def make_message(text: str, user_id: int = 123, chat_type: str = "private") -> TelegramMessage:
     return TelegramMessage(
         update_id=1,
@@ -443,6 +452,22 @@ def test_handler_schedules_time_range_as_event() -> None:
     assert response.startswith("Created event")
     assert notion.created[0][0].value == "event"
     assert "end_datetime" in notion.created[0][1]
+
+
+def test_handler_creates_calendar_event_for_scheduled_event() -> None:
+    repo = FakeRepository()
+    notion = FakeNotion()
+    calendar = FakeCalendar()
+    settings = Settings(telegram_allowed_user_ids="123")
+    handler = KiboHandler(settings, repo, notion, calendar=calendar)
+
+    response = handler.handle(make_message("schedule gym from 6 to 7 pm"))
+
+    assert response.startswith("Created event")
+    assert "Calendar: https://calendar.google.com/event" in response
+    assert calendar.created[0][0].value == "event"
+    assert repo.actions[0].destination == "notion"
+    assert repo.actions[1].destination == "google_calendar"
 
 
 def test_handler_week() -> None:
