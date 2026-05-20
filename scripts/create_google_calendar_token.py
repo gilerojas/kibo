@@ -45,6 +45,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    write_env = "--write-env" in sys.argv
     load_dotenv_file(str(PROJECT_ROOT / ".env"))
     client_id = os.getenv("GOOGLE_CALENDAR_CLIENT_ID", "").strip()
     client_secret = os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET", "").strip()
@@ -92,9 +93,31 @@ def main() -> int:
     if not token:
         print("Google did not return a refresh token. Re-run with prompt=consent or remove prior app access.", file=sys.stderr)
         return 1
+    if write_env:
+        update_env_value(PROJECT_ROOT / ".env", "GOOGLE_CALENDAR_REFRESH_TOKEN", token)
+        print("GOOGLE_CALENDAR_REFRESH_TOKEN written to local .env.")
+        print("Add the same value to Render before production testing.")
+        return 0
     print("\nAdd this to .env and Render:")
     print(f"GOOGLE_CALENDAR_REFRESH_TOKEN={token}")
     return 0
+
+
+def update_env_value(path: Path, key: str, value: str) -> None:
+    line = f"{key}={value}\n"
+    if not path.exists():
+        path.write_text(line, encoding="utf-8")
+        return
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    for index, existing in enumerate(lines):
+        if existing.startswith(f"{key}="):
+            lines[index] = line
+            path.write_text("".join(lines), encoding="utf-8")
+            return
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    lines.append(line)
+    path.write_text("".join(lines), encoding="utf-8")
 
 
 if __name__ == "__main__":
