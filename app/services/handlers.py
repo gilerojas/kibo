@@ -119,24 +119,33 @@ class KiboHandler:
             return response
 
         if parsed.intent in {Intent.NOTE, Intent.TASK, Intent.LINK, Intent.REMINDER, Intent.EVENT}:
-            result = self.notion.create_for_intent(parsed.intent, parsed.parsed_payload, parsed.raw_text)
-            self.repository.create_action(command_id=command_id, user_id=user_id, result=result)
-            if result.status == "succeeded":
-                if parsed.intent == Intent.REMINDER and parsed.parsed_payload.get("datetime"):
-                    reminder_at = datetime.fromisoformat(str(parsed.parsed_payload["datetime"]))
+            item_payloads = expanded_item_payloads(parsed.parsed_payload)
+            results: list[tuple[dict, ActionResult]] = []
+            for payload in item_payloads:
+                item_text = str(payload.get("text") or parsed.body)
+                result = self.notion.create_for_intent(parsed.intent, payload, item_text)
+                self.repository.create_action(command_id=command_id, user_id=user_id, result=result)
+                results.append((payload, result))
+                if result.status == "succeeded" and parsed.intent == Intent.REMINDER and payload.get("datetime"):
+                    reminder_at = datetime.fromisoformat(str(payload["datetime"]))
                     if reminder_at.tzinfo is None:
                         reminder_at = reminder_at.replace(tzinfo=self.settings.tzinfo)
                     self.repository.create_reminder(
                         command_id=command_id,
                         user_id=user_id,
                         telegram_chat_id=message.chat_id,
-                        title=parsed.body,
+                        title=item_text,
                         reminder_at=reminder_at,
                         notion_url=result.external_url,
                     )
+            failed = [result for _, result in results if result.status != "succeeded"]
+            if not failed:
                 self.repository.update_command_status(command_id, CommandStatus.PROCESSED)
-                return confirmation_for(parsed.intent, parsed.body, result.external_url)
-            self.repository.update_command_status(command_id, CommandStatus.FAILED, error_message=result.error_message)
+                if len(results) > 1:
+                    return multi_confirmation_for(parsed.intent, results)
+                payload, result = results[0]
+                return confirmation_for(parsed.intent, str(payload.get("text") or parsed.body), result.external_url)
+            self.repository.update_command_status(command_id, CommandStatus.FAILED, error_message=failed[0].error_message)
             return "I saved the command, but Notion could not create the item. Check the Notion integration and database IDs."
 
         self.repository.update_command_status(command_id, CommandStatus.FAILED, error_message="Unsupported command")
@@ -153,6 +162,44 @@ def confirmation_for(intent: Intent, body: str, url: str | None) -> str:
     }[intent]
     suffix = f"\n{url}" if url else ""
     return f"{prefix}: {body}{suffix}"
+
+
+def multi_confirmation_for(intent: Intent, results: list[tuple[dict, ActionResult]]) -> str:
+    noun = {
+        Intent.NOTE: "notes",
+        Intent.TASK: "tasks",
+        Intent.LINK: "links",
+        Intent.REMINDER: "reminders",
+        Intent.EVENT: "events",
+    }[intent]
+    lines = [f"Created {len(results)} {noun}:"]
+    for payload, result in results:
+        line = f"- {payload.get('text', '').strip()}"
+        if result.external_url:
+            line += f"\n  {result.external_url}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def expanded_item_payloads(payload: dict) -> list[dict]:
+    items = payload.get("items")
+    if not isinstance(items, list) or len(items) < 2:
+        return [payload]
+
+    inherited = {key: value for key, value in payload.items() if key not in {"items", "text"}}
+    expanded: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or item.get("title") or "").strip()
+        if not text:
+            continue
+        item_payload = {**inherited, "text": text}
+        for key in ("date", "datetime", "end_datetime", "url"):
+            if item.get(key):
+                item_payload[key] = item[key]
+        expanded.append(item_payload)
+    return expanded if len(expanded) > 1 else [payload]
 
 
 def format_summary(summary: dict, *, today: dict | None = None) -> str:

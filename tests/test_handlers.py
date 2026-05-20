@@ -263,6 +263,40 @@ def test_handler_uses_llm_for_ambiguous_natural_message() -> None:
     assert notion.created[0][0].value == "task"
 
 
+def test_handler_creates_multiple_tasks_from_llm_items() -> None:
+    from app.models.schemas import Intent, ParsedCommand
+
+    repo = FakeRepository()
+    notion = FakeNotion()
+    settings = Settings(telegram_allowed_user_ids="123")
+    llm = FakeLlmParser(
+        ParsedCommand(
+            Intent.TASK,
+            "for tomorrow we have next tasks:\n- Create agent for AI and understand it\n- Finish sophIA",
+            body="Tomorrow tasks",
+            parsed_payload={
+                "text": "Tomorrow tasks",
+                "date": "2026-05-20",
+                "llm": {"confidence": 0.94},
+                "items": [
+                    {"text": "Create agent for AI and understand it", "date": "2026-05-20"},
+                    {"text": "Finish sophIA", "date": "2026-05-20"},
+                ],
+            },
+        )
+    )
+    handler = KiboHandler(settings, repo, notion, llm_parser=llm)
+
+    response = handler.handle(make_message("for tomorrow we have next tasks:\n- Create agent for AI and understand it\n- Finish sophIA"))
+
+    assert response.startswith("Created 2 tasks")
+    assert len(notion.created) == 2
+    assert notion.created[0][1]["text"] == "Create agent for AI and understand it"
+    assert notion.created[1][1]["text"] == "Finish sophIA"
+    assert notion.created[0][1]["date"] == "2026-05-20"
+    assert len(repo.actions) == 2
+
+
 def test_handler_does_not_call_llm_for_slash_command() -> None:
     from app.models.schemas import Intent, ParsedCommand
 

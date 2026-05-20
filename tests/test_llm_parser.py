@@ -75,3 +75,44 @@ def test_llm_parser_accepts_fenced_json() -> None:
 
     assert parsed.intent == Intent.REMINDER
     assert parsed.parsed_payload["datetime"] == "2026-05-20T09:00:00-04:00"
+
+
+def test_llm_parser_accepts_multi_item_tasks() -> None:
+    parsed = parsed_command_from_llm_json(
+        "for tomorrow we have next tasks:\n- Create agent for AI and understand it\n- Finish sophIA",
+        """
+        {
+          "intent": "task",
+          "confidence": 0.94,
+          "title": "Tomorrow tasks",
+          "items": [
+            {
+              "title": "Create agent for AI and understand it",
+              "date": "2026-05-20",
+              "datetime": null,
+              "url": null
+            },
+            {
+              "title": "Finish sophIA",
+              "date": "2026-05-20",
+              "datetime": null,
+              "url": null
+            }
+          ],
+          "date": "2026-05-20",
+          "datetime": null,
+          "url": null,
+          "needs_clarification": false,
+          "clarification_question": null
+        }
+        """,
+        model="test-model",
+    )
+
+    assert parsed.intent == Intent.TASK
+    assert parsed.body == "Tomorrow tasks"
+    assert parsed.parsed_payload["date"] == "2026-05-20"
+    assert parsed.parsed_payload["items"] == [
+        {"text": "Create agent for AI and understand it", "date": "2026-05-20"},
+        {"text": "Finish sophIA", "date": "2026-05-20"},
+    ]

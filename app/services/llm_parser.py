@@ -77,6 +77,14 @@ Schema:
   "intent": "task",
   "confidence": 0.0,
   "title": "short cleaned title",
+  "items": [
+    {{
+      "title": "single cleaned item title",
+      "date": "YYYY-MM-DD or null",
+      "datetime": "ISO-8601 datetime or null",
+      "url": "https://... or null"
+    }}
+  ],
   "date": "YYYY-MM-DD or null",
   "datetime": "ISO-8601 datetime or null",
   "url": "https://... or null",
@@ -91,6 +99,9 @@ Rules:
 - Use task for action items the user needs to do.
 - Use note for ideas, observations, or information to save.
 - Use unknown if the message is too vague.
+- If the message contains a bullet list or numbered list of multiple tasks, notes, links, reminders, or events with the same intent, return each entry in items.
+- Apply shared date/datetime context to all items when a phrase like tomorrow or Friday introduces the list.
+- If there is only one item, items can be null or omitted.
 - Convert relative dates like tomorrow, Friday, next Monday using the current datetime.
 - If exact time is present, include datetime. If only date is present, include date.
 - Confidence must reflect ambiguity. Do not exceed 0.79 if clarification is needed.
@@ -124,6 +135,9 @@ def parsed_command_from_llm_json(raw_text: str, content: str, *, model: str) -> 
         value = payload.get(key)
         if value:
             parsed_payload[key] = value
+    items = clean_llm_items(payload.get("items"))
+    if items:
+        parsed_payload["items"] = items
 
     if needs_clarification:
         return ParsedCommand(
@@ -136,6 +150,26 @@ def parsed_command_from_llm_json(raw_text: str, content: str, *, model: str) -> 
         )
 
     return ParsedCommand(Intent(intent_value), raw_text, body=body, parsed_payload=parsed_payload)
+
+
+def clean_llm_items(items: Any) -> list[dict[str, str]]:
+    if not isinstance(items, list):
+        return []
+
+    cleaned: list[dict[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or item.get("text") or "").strip()
+        if not title:
+            continue
+        cleaned_item = {"text": title}
+        for key in ("date", "datetime", "url"):
+            value = item.get(key)
+            if value:
+                cleaned_item[key] = str(value)
+        cleaned.append(cleaned_item)
+    return cleaned
 
 
 def clarification(raw_text: str, message: str) -> ParsedCommand:
