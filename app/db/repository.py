@@ -275,6 +275,31 @@ class SupabaseRepository:
             ).fetchone()
         return row
 
+    def latest_pending_clarification(self, user_id: UUID, since: datetime) -> dict[str, Any] | None:
+        rows = self.recent_pending_clarifications(user_id, since, limit=1)
+        return rows[0] if rows else None
+
+    def recent_pending_clarifications(self, user_id: UUID, since: datetime, *, limit: int = 3) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select id, raw_text, intent, parsed_payload, error_message, created_at
+                from (
+                    select id, raw_text, intent, parsed_payload, error_message, created_at
+                    from kibo.commands
+                    where user_id = %s
+                      and status = 'rejected'
+                      and error_message is not null
+                      and created_at >= %s
+                    order by created_at desc
+                    limit %s
+                ) recent
+                order by created_at asc
+                """,
+                (user_id, since, limit),
+            ).fetchall()
+        return list(rows)
+
     def mark_reminder_done_for_command(self, command_id: UUID) -> None:
         with self.connect() as conn:
             conn.execute(

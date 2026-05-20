@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from app.config import Settings
-from app.models.schemas import ActionResult, CommandStatus, Intent, TelegramMessage
+from app.models.schemas import ActionResult, CommandStatus, Intent, ParsedCommand, TelegramMessage
 from app.services.auth import is_authorized_user
 from app.services.llm_parser import AnthropicParser
 from app.services.parser import HELP_TEXT, START_TEXT, parse_command
@@ -24,13 +24,7 @@ class KiboHandler:
 
     def handle(self, message: TelegramMessage) -> str:
         now = datetime.now(self.settings.tzinfo)
-        parsed = parse_command(message.text, now=now)
-        if parsed.needs_clarification and not message.text.strip().startswith("/"):
-            try:
-                llm_parsed = self.llm_parser.parse(message.text, now=now)
-                parsed = llm_parsed
-            except Exception:
-                parsed = parsed
+        parsed = self._parse_message(message.text, now=now)
 
         if not is_authorized_user(message.user_id, self.settings):
             command_id = self.repository.create_command(
@@ -48,15 +42,22 @@ class KiboHandler:
             return "Kibo is not authorized for this Telegram user."
 
         user_id = self.repository.upsert_user(message, timezone=self.settings.default_timezone)
-        command_id = self.repository.create_command(user_id=user_id, message=message, parsed=parsed)
 
         if message.chat_type != "private":
+            command_id = self.repository.create_command(user_id=user_id, message=message, parsed=parsed)
             self.repository.update_command_status(
                 command_id,
                 CommandStatus.REJECTED,
                 error_message="Kibo MVP only supports private Telegram chats",
             )
             return "Kibo currently works only in a private chat. Open this bot directly and send /start."
+
+        if parsed.needs_clarification and not message.text.strip().startswith("/"):
+            clarified = self._resolve_pending_clarification(user_id, message.text, now=now)
+            if clarified and not clarified.needs_clarification:
+                parsed = clarified
+
+        command_id = self.repository.create_command(user_id=user_id, message=message, parsed=parsed)
 
         if parsed.error:
             status = CommandStatus.REJECTED if parsed.needs_clarification else CommandStatus.FAILED
@@ -150,6 +151,50 @@ class KiboHandler:
 
         self.repository.update_command_status(command_id, CommandStatus.FAILED, error_message="Unsupported command")
         return "Unsupported command. Try /help."
+
+    def _parse_message(self, text: str, *, now: datetime) -> ParsedCommand:
+        parsed = parse_command(text, now=now)
+        if parsed.needs_clarification and not text.strip().startswith("/"):
+            try:
+                return self.llm_parser.parse(text, now=now)
+            except Exception:
+                return parsed
+        return parsed
+
+    def _resolve_pending_clarification(self, user_id, reply_text: str, *, now: datetime) -> ParsedCommand | None:
+        if hasattr(self.repository, "recent_pending_clarifications"):
+            pending_messages = self.repository.recent_pending_clarifications(user_id, now - timedelta(minutes=30), limit=3)
+        elif hasattr(self.repository, "latest_pending_clarification"):
+            pending = self.repository.latest_pending_clarification(user_id, now - timedelta(minutes=30))
+            pending_messages = [pending] if pending else []
+        else:
+            return None
+        if not pending_messages:
+            return None
+        pending_context = "\n\n".join(f"- {message['raw_text']}" for message in pending_messages)
+        combined = (
+            "Previous Kibo messages that needed clarification, oldest first:\n"
+            f"{pending_context}\n\n"
+            "User clarification reply:\n"
+            f"{reply_text}"
+        )
+        try:
+            parsed = self.llm_parser.parse(combined, now=now)
+        except Exception:
+            return None
+        if parsed.needs_clarification:
+            return None
+        parsed.parsed_payload["clarified_from_command_id"] = str(pending_messages[-1]["id"])
+        parsed.parsed_payload["clarified_from_command_ids"] = [str(message["id"]) for message in pending_messages]
+        parsed.parsed_payload["clarification_reply"] = reply_text
+        return ParsedCommand(
+            parsed.intent,
+            reply_text,
+            body=parsed.body,
+            parsed_payload=parsed.parsed_payload,
+            error=parsed.error,
+            needs_clarification=parsed.needs_clarification,
+        )
 
 
 def confirmation_for(intent: Intent, body: str, url: str | None) -> str:

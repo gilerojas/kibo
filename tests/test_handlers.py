@@ -11,6 +11,7 @@ class FakeRepository:
         self.actions = []
         self.statuses = []
         self.reminders = []
+        self.pending_clarification = None
         self.command_id = uuid4()
         self.user_id = uuid4()
 
@@ -79,6 +80,16 @@ class FakeRepository:
         rows = self.search_items(user_id, query)
         return rows[0] if rows else None
 
+    def latest_pending_clarification(self, user_id, since):
+        return self.pending_clarification
+
+    def recent_pending_clarifications(self, user_id, since, *, limit=3):
+        if self.pending_clarification is None:
+            return []
+        if isinstance(self.pending_clarification, list):
+            return self.pending_clarification[-limit:]
+        return [self.pending_clarification]
+
     def mark_reminder_done_for_command(self, command_id):
         self.reminders.append({"done_command_id": command_id})
 
@@ -106,12 +117,13 @@ class FakeNotion:
 
 class FakeLlmParser:
     def __init__(self, parsed):
-        self.parsed = parsed
+        self.parsed = parsed if isinstance(parsed, list) else [parsed]
         self.calls = []
 
     def parse(self, text, *, now):
         self.calls.append((text, now))
-        return self.parsed
+        index = min(len(self.calls) - 1, len(self.parsed) - 1)
+        return self.parsed[index]
 
 
 def make_message(text: str, user_id: int = 123, chat_type: str = "private") -> TelegramMessage:
@@ -295,6 +307,101 @@ def test_handler_creates_multiple_tasks_from_llm_items() -> None:
     assert notion.created[1][1]["text"] == "Finish sophIA"
     assert notion.created[0][1]["date"] == "2026-05-20"
     assert len(repo.actions) == 2
+
+
+def test_handler_resolves_pending_event_clarification() -> None:
+    from app.models.schemas import Intent, ParsedCommand
+
+    repo = FakeRepository()
+    repo.pending_clarification = {
+        "id": uuid4(),
+        "raw_text": "Please save an event i have called Bote Blitz on the 6th of june, idk the hours right now but say it is the afternoon",
+    }
+    notion = FakeNotion()
+    settings = Settings(telegram_allowed_user_ids="123")
+    llm = FakeLlmParser(
+        [
+            ParsedCommand(
+                Intent.UNKNOWN,
+                "2pm until 6pm is good",
+                body="2pm until 6pm is good",
+                parsed_payload={"text": "2pm until 6pm is good", "llm": {"confidence": 0.71}},
+                error="What event or task are you scheduling for 2pm to 6pm?",
+                needs_clarification=True,
+            ),
+            ParsedCommand(
+                Intent.EVENT,
+                "Previous Kibo message that needed clarification...",
+                body="Bote Blitz",
+                parsed_payload={
+                    "text": "Bote Blitz",
+                    "date": "2026-06-06",
+                    "datetime": "2026-06-06T14:00:00-04:00",
+                    "end_datetime": "2026-06-06T18:00:00-04:00",
+                    "llm": {"confidence": 0.94},
+                },
+            ),
+        ]
+    )
+    handler = KiboHandler(settings, repo, notion, llm_parser=llm)
+
+    response = handler.handle(make_message("2pm until 6pm is good"))
+
+    assert response.startswith("Created event: Bote Blitz")
+    assert len(llm.calls) == 2
+    assert "Previous Kibo message" in llm.calls[1][0]
+    assert notion.created[0][0].value == "event"
+    assert notion.created[0][1]["text"] == "Bote Blitz"
+    assert notion.created[0][1]["datetime"] == "2026-06-06T14:00:00-04:00"
+    assert notion.created[0][1]["clarification_reply"] == "2pm until 6pm is good"
+
+
+def test_handler_uses_recent_clarification_chain() -> None:
+    from app.models.schemas import Intent, ParsedCommand
+
+    repo = FakeRepository()
+    repo.pending_clarification = [
+        {
+            "id": uuid4(),
+            "raw_text": "Please save an event i have called Bote Blitz on the 6th of june, idk the hours right now but say it is the afternoon",
+        },
+        {"id": uuid4(), "raw_text": "2pm until 6pm is good"},
+        {"id": uuid4(), "raw_text": "Bote Blitz"},
+    ]
+    notion = FakeNotion()
+    settings = Settings(telegram_allowed_user_ids="123")
+    llm = FakeLlmParser(
+        [
+            ParsedCommand(
+                Intent.UNKNOWN,
+                "yes",
+                body="yes",
+                parsed_payload={"text": "yes", "llm": {"confidence": 0.4}},
+                error="What would you like to do?",
+                needs_clarification=True,
+            ),
+            ParsedCommand(
+                Intent.EVENT,
+                "Previous Kibo messages that needed clarification...",
+                body="Bote Blitz",
+                parsed_payload={
+                    "text": "Bote Blitz",
+                    "date": "2026-06-06",
+                    "datetime": "2026-06-06T14:00:00-04:00",
+                    "end_datetime": "2026-06-06T18:00:00-04:00",
+                    "llm": {"confidence": 0.9},
+                },
+            ),
+        ]
+    )
+    handler = KiboHandler(settings, repo, notion, llm_parser=llm)
+
+    response = handler.handle(make_message("yes"))
+
+    assert response.startswith("Created event: Bote Blitz")
+    assert "Bote Blitz on the 6th of june" in llm.calls[1][0]
+    assert "2pm until 6pm" in llm.calls[1][0]
+    assert notion.created[0][1]["date"] == "2026-06-06"
 
 
 def test_handler_does_not_call_llm_for_slash_command() -> None:
