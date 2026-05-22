@@ -155,7 +155,7 @@ def test_handler_creates_note() -> None:
 
     response = handler.handle(make_message("/note test note"))
 
-    assert response.startswith("Saved note: test note")
+    assert response.startswith("Noted: test note")
     assert notion.created[0][0].value == "note"
     assert repo.actions[0].status == "succeeded"
 
@@ -168,7 +168,7 @@ def test_handler_creates_book() -> None:
 
     response = handler.handle(make_message("/book The Beginning of Infinity"))
 
-    assert response.startswith("Saved book: The Beginning of Infinity")
+    assert response.startswith("Book saved: The Beginning of Infinity")
     assert notion.created[0][0].value == "book"
     assert repo.actions[0].status == "succeeded"
 
@@ -220,7 +220,7 @@ def test_handler_creates_scheduled_reminder() -> None:
 
     response = handler.handle(make_message("/remind Review invoices today at 9am"))
 
-    assert response.startswith("Created reminder")
+    assert response.startswith("Reminder set")
     assert len(repo.reminders) == 1
     assert repo.reminders[0]["title"] == "Review invoices today at 9am"
 
@@ -258,7 +258,7 @@ def test_handler_creates_natural_task() -> None:
 
     response = handler.handle(make_message("pay edenorte tomorrow"))
 
-    assert response.startswith("Created task")
+    assert response.startswith("Task added")
     assert notion.created[0][0].value == "task"
 
 
@@ -292,7 +292,7 @@ def test_handler_uses_llm_for_ambiguous_natural_message() -> None:
 
     response = handler.handle(make_message("tengo que llamar a Elayne el viernes"))
 
-    assert response.startswith("Created task")
+    assert response.startswith("Task added")
     assert llm.calls
     assert notion.created[0][0].value == "task"
 
@@ -323,7 +323,7 @@ def test_handler_creates_multiple_tasks_from_llm_items() -> None:
 
     response = handler.handle(make_message("for tomorrow we have next tasks:\n- Create agent for AI and understand it\n- Finish sophIA"))
 
-    assert response.startswith("Created 2 tasks")
+    assert response.startswith("Handled 2 tasks")
     assert len(notion.created) == 2
     assert notion.created[0][1]["text"] == "Create agent for AI and understand it"
     assert notion.created[1][1]["text"] == "Finish sophIA"
@@ -369,7 +369,7 @@ def test_handler_resolves_pending_event_clarification() -> None:
 
     response = handler.handle(make_message("2pm until 6pm is good"))
 
-    assert response.startswith("Created event: Bote Blitz")
+    assert response.startswith("Calendar is set: Bote Blitz")
     assert len(llm.calls) == 2
     assert "Previous Kibo message" in llm.calls[1][0]
     assert notion.created[0][0].value == "event"
@@ -420,7 +420,7 @@ def test_handler_uses_recent_clarification_chain() -> None:
 
     response = handler.handle(make_message("yes"))
 
-    assert response.startswith("Created event: Bote Blitz")
+    assert response.startswith("Calendar is set: Bote Blitz")
     assert "Bote Blitz on the 6th of june" in llm.calls[1][0]
     assert "2pm until 6pm" in llm.calls[1][0]
     assert notion.created[0][1]["date"] == "2026-06-06"
@@ -437,7 +437,7 @@ def test_handler_does_not_call_llm_for_slash_command() -> None:
 
     response = handler.handle(make_message("/note deterministic"))
 
-    assert response.startswith("Saved note")
+    assert response.startswith("Noted")
     assert not llm.calls
 
 
@@ -449,7 +449,7 @@ def test_handler_schedules_time_range_as_event() -> None:
 
     response = handler.handle(make_message("schedule gym from 6 to 7 pm"))
 
-    assert response.startswith("Created event")
+    assert response.startswith("Calendar is set")
     assert notion.created[0][0].value == "event"
     assert "end_datetime" in notion.created[0][1]
 
@@ -463,8 +463,8 @@ def test_handler_creates_calendar_event_for_scheduled_event() -> None:
 
     response = handler.handle(make_message("schedule gym from 6 to 7 pm"))
 
-    assert response.startswith("Created event")
-    assert "Calendar: https://calendar.google.com/event" in response
+    assert response.startswith("Calendar is set")
+    assert "Google Calendar is ready: https://calendar.google.com/event" in response
     assert calendar.created[0][0].value == "event"
     assert repo.actions[0].destination == "notion"
     assert repo.actions[1].destination == "google_calendar"

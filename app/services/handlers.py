@@ -155,12 +155,7 @@ class KiboHandler:
                 if len(results) > 1:
                     return multi_confirmation_for(parsed.intent, results)
                 payload, result = results[0]
-                response = confirmation_for(parsed.intent, str(payload.get("text") or parsed.body), result.external_url)
-                if payload.get("_calendar_url"):
-                    response += f"\nCalendar: {payload['_calendar_url']}"
-                if payload.get("_calendar_error"):
-                    response += f"\nCalendar failed: {payload['_calendar_error']}"
-                return response
+                return confirmation_for(parsed.intent, str(payload.get("text") or parsed.body), result.external_url, payload=payload)
             self.repository.update_command_status(command_id, CommandStatus.FAILED, error_message=failed[0].error_message)
             return "I saved the command, but Notion could not create the item. Check the Notion integration and database IDs."
 
@@ -212,17 +207,18 @@ class KiboHandler:
         )
 
 
-def confirmation_for(intent: Intent, body: str, url: str | None) -> str:
-    prefix = {
-        Intent.NOTE: "Saved note",
-        Intent.TASK: "Created task",
-        Intent.LINK: "Saved link",
-        Intent.BOOK: "Saved book",
-        Intent.REMINDER: "Created reminder",
-        Intent.EVENT: "Created event",
+def confirmation_for(intent: Intent, body: str, url: str | None, *, payload: dict | None = None) -> str:
+    payload = payload or {}
+    headline = {
+        Intent.NOTE: f"Noted: {body}",
+        Intent.TASK: f"Task added: {body}",
+        Intent.LINK: f"Saved for later: {body}",
+        Intent.BOOK: f"Book saved: {body}",
+        Intent.REMINDER: f"Reminder set: {body}",
+        Intent.EVENT: f"Calendar is set: {body}",
     }[intent]
-    suffix = f"\n{url}" if url else ""
-    return f"{prefix}: {body}{suffix}"
+    details = response_details(intent, url, payload)
+    return "\n".join([headline, *details])
 
 
 def multi_confirmation_for(intent: Intent, results: list[tuple[dict, ActionResult]]) -> str:
@@ -234,17 +230,41 @@ def multi_confirmation_for(intent: Intent, results: list[tuple[dict, ActionResul
         Intent.REMINDER: "reminders",
         Intent.EVENT: "events",
     }[intent]
-    lines = [f"Created {len(results)} {noun}:"]
+    lines = [f"Handled {len(results)} {noun}:"]
     for payload, result in results:
         line = f"- {payload.get('text', '').strip()}"
-        if result.external_url:
-            line += f"\n  {result.external_url}"
-        if payload.get("_calendar_url"):
-            line += f"\n  Calendar: {payload['_calendar_url']}"
-        if payload.get("_calendar_error"):
-            line += f"\n  Calendar failed: {payload['_calendar_error']}"
+        details = response_details(intent, result.external_url, payload)
+        if details:
+            line += "\n  " + "\n  ".join(details)
         lines.append(line)
     return "\n".join(lines)
+
+
+def response_details(intent: Intent, notion_url: str | None, payload: dict) -> list[str]:
+    details: list[str] = []
+    if payload.get("datetime"):
+        details.append(f"When: {friendly_when(str(payload['datetime']), str(payload.get('end_datetime') or ''))}")
+    elif payload.get("date"):
+        details.append(f"When: {payload['date']}")
+    if payload.get("_calendar_url"):
+        details.append(f"Google Calendar is ready: {payload['_calendar_url']}")
+    if payload.get("_calendar_error"):
+        details.append(f"Google Calendar needs attention: {payload['_calendar_error']}")
+    if notion_url:
+        label = "Open in Notion" if intent in {Intent.NOTE, Intent.TASK, Intent.LINK, Intent.BOOK} else "Notion record"
+        details.append(f"{label}: {notion_url}")
+    return details
+
+
+def friendly_when(start: str, end: str = "") -> str:
+    start_dt = datetime.fromisoformat(start)
+    start_text = start_dt.strftime("%b %-d, %-I:%M %p")
+    if not end:
+        return start_text
+    end_dt = datetime.fromisoformat(end)
+    if end_dt.date() == start_dt.date():
+        return f"{start_text}-{end_dt.strftime('%-I:%M %p')}"
+    return f"{start_text}-{end_dt.strftime('%b %-d, %-I:%M %p')}"
 
 
 def expanded_item_payloads(payload: dict) -> list[dict]:
