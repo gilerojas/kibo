@@ -28,11 +28,18 @@ class NotionService:
 
         response = requests.post(f"{self.base_url}/pages", headers=self._headers(), json=body, timeout=20)
         if response.status_code >= 400:
+            error_message = f"Notion API returned {response.status_code}"
+            try:
+                detail = response.json().get("message")
+                if detail:
+                    error_message = f"{error_message}: {detail[:500]}"
+            except Exception:
+                pass
             return ActionResult(
                 destination="notion",
                 action_type=intent.value,
                 status="failed",
-                error_message=f"Notion API returned {response.status_code}",
+                error_message=error_message,
             )
 
         data = response.json()

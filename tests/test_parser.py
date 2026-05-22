@@ -143,6 +143,15 @@ def test_parse_schedule_time_range_as_event_today() -> None:
     assert parsed.parsed_payload["end_datetime"] == "2026-05-19T19:00:00"
 
 
+def test_parse_bare_time_range_crossing_noon() -> None:
+    now = datetime(2026, 5, 21, 12, 0)
+    parsed = parse_command("Ok Kibo please schedule gym tomorrow from 12:30 to 1:30", now=now)
+    assert parsed.intent == Intent.EVENT
+    assert parsed.parsed_payload["date"] == "2026-05-22"
+    assert parsed.parsed_payload["datetime"] == "2026-05-22T12:30:00"
+    assert parsed.parsed_payload["end_datetime"] == "2026-05-22T13:30:00"
+
+
 def test_parse_natural_ambiguous_text_clarifies() -> None:
     parsed = parse_command("random thought with no signal")
     assert parsed.intent == Intent.UNKNOWN

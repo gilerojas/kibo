@@ -217,6 +217,8 @@ def extract_simple_schedule(text: str, *, now: datetime | None = None) -> dict[s
             int(range_match.group("end_minute") or "0"),
             range_match.group("end_ampm") or range_match.group("start_ampm"),
         )
+        if not range_match.group("start_ampm") and not range_match.group("end_ampm"):
+            end_hour, end_minute = infer_end_hour_for_bare_range(start_hour, start_minute, end_hour, end_minute)
         if 0 <= start_hour <= 23 and 0 <= start_minute <= 59 and 0 <= end_hour <= 23 and 0 <= end_minute <= 59:
             result["datetime"] = datetime.combine(date_value, datetime.min.time(), tzinfo=now.tzinfo).replace(
                 hour=start_hour,
@@ -249,3 +251,11 @@ def normalize_hour(hour: int, minute: int, ampm: str | None) -> tuple[int, int]:
         if ampm.lower() == "am" and hour == 12:
             hour = 0
     return hour, minute
+
+
+def infer_end_hour_for_bare_range(start_hour: int, start_minute: int, end_hour: int, end_minute: int) -> tuple[int, int]:
+    if (end_hour, end_minute) > (start_hour, start_minute):
+        return end_hour, end_minute
+    if end_hour < 12:
+        return end_hour + 12, end_minute
+    return end_hour, end_minute
