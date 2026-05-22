@@ -12,6 +12,11 @@ TIME_RANGE_RE = re.compile(
     r"\bfrom\s+(?P<start_hour>\d{1,2})(?::(?P<start_minute>\d{2}))?\s*(?P<start_ampm>am|pm)?\s+to\s+(?P<end_hour>\d{1,2})(?::(?P<end_minute>\d{2}))?\s*(?P<end_ampm>am|pm)?\b",
     re.IGNORECASE,
 )
+SCHEDULE_PREFIX_RE = re.compile(r"^\s*(?:ok\s+)?(?:kibo\s+)?(?:please\s+)?(?:schedule|add|create|put|book)\s+", re.IGNORECASE)
+DATE_TIME_TRAILER_RE = re.compile(
+    r"\s+\b(?:today|tomorrow|next\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b.*$|\s+\bfrom\b.*$|\s+\bat\b.*$",
+    re.IGNORECASE,
+)
 TASK_VERB_RE = re.compile(
     r"^(call|pay|send|review|check|buy|email|message|follow up|follow-up|prepare|finish|submit|renew)\b",
     re.IGNORECASE,
@@ -157,7 +162,8 @@ def parse_natural_command(raw_text: str, *, now: datetime | None = None) -> Pars
         return ParsedCommand(Intent.REMINDER, raw_text, body=body, parsed_payload=payload)
 
     if EVENT_RE.search(lower) and schedule:
-        return ParsedCommand(Intent.EVENT, raw_text, body=raw_text, parsed_payload={"text": raw_text, **schedule})
+        body = clean_event_text(raw_text)
+        return ParsedCommand(Intent.EVENT, raw_text, body=body, parsed_payload={"text": body, **schedule})
 
     if TASK_VERB_RE.search(lower):
         return ParsedCommand(Intent.TASK, raw_text, body=raw_text, parsed_payload={"text": raw_text, **schedule})
@@ -177,6 +183,12 @@ def clean_reminder_text(text: str) -> str:
     cleaned = re.sub(r"^\s*reminder[:\s]+", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bto\s+", "", cleaned, count=1, flags=re.IGNORECASE)
     return cleaned.strip() or text.strip()
+
+
+def clean_event_text(text: str) -> str:
+    cleaned = SCHEDULE_PREFIX_RE.sub("", text.strip())
+    cleaned = DATE_TIME_TRAILER_RE.sub("", cleaned).strip()
+    return cleaned or text.strip()
 
 
 def extract_simple_schedule(text: str, *, now: datetime | None = None) -> dict[str, object]:
